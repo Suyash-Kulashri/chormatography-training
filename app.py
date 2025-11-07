@@ -463,64 +463,111 @@ def main():
     colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
     color_map = {val: colors[i % len(colors)] for i, val in enumerate(unique_values)}
 
-    for val in unique_values:
-        subset = filtered_data[filtered_data[color_col] == val]
-        fig.add_trace(go.Scatter(
-            x=subset['injection_time'],
-            y=subset[selected_param],
-            mode='markers',
-            name=f'{color_by}: {val}',
-            marker=dict(color=color_map[val]),
-            showlegend=False,  # Hide legend marker
-            hovertemplate=f'<b>Date</b>: %{{x}}<br><b>{selected_param}</b>: %{{y:.3f}}<br><b>{color_by}</b>: %{{customdata}}<extra></extra>',
-            customdata=subset[color_col]
-        ))
-
-    historical_anomalies = filtered_data[filtered_data['anomaly'] == 1]
+    # 1. HISTORICAL DATA - All data points (normal + anomalies)
+    # Show all historical data points first (as a baseline)
     fig.add_trace(go.Scatter(
-        x=historical_anomalies['injection_time'],
-        y=historical_anomalies[selected_param],
+        x=filtered_data['injection_time'],
+        y=filtered_data[selected_param],
         mode='markers',
-        name='Historical Anomalies',
-        marker=dict(color='orange', symbol='x'),
-        text=historical_anomalies.apply(
-            lambda row: (
-                f"Date: {row['injection_time']}<br>"
-                f"Parameter: {selected_param}: {row[selected_param]:.3f}<br>"
-                f"Anomaly: Yes<br>"
-                f"{color_by}: {str(row[color_col]) if pd.notnull(row[color_col]) else 'Unknown'}<br>"
-                f"Feature: {str(row['anomaly_feature']) if pd.notnull(row['anomaly_feature']) else selected_param}<br>"
-                f"Deviation: {format(float(row['anomaly_deviation']), '.3f') if pd.notnull(row['anomaly_deviation']) else '0.000'}<br>"
-                f"Severity: {'Severe' if pd.notnull(row['anomaly_score']) and row['anomaly_score'] < -0.05 else 'Moderate' if pd.notnull(row['anomaly_score']) and row['anomaly_score'] < 0 else 'Normal'}"
-            ), axis=1
-        ),
-        hovertemplate='%{text}<extra></extra>',
-        hoverlabel=dict(bgcolor='white', font_size=12, align='left')
+        name='Historical Data',
+        marker=dict(color='lightblue', size=6, opacity=0.6),
+        hovertemplate=f'<b>Date</b>: %{{x}}<br><b>{selected_param}</b>: %{{y:.3f}}<br><b>Type</b>: Historical<extra></extra>',
+        legendgroup='historical',
+        showlegend=True
     ))
 
+    # 2. HISTORICAL ANOMALIES - Detected anomalies in historical data
+    historical_anomalies = filtered_data[filtered_data['anomaly'] == 1]
+    if not historical_anomalies.empty:
+        fig.add_trace(go.Scatter(
+            x=historical_anomalies['injection_time'],
+            y=historical_anomalies[selected_param],
+            mode='markers',
+            name=f'Historical Anomalies ({len(historical_anomalies)})',
+            marker=dict(color='orange', symbol='x', size=12, line=dict(width=2, color='darkorange')),
+            text=historical_anomalies.apply(
+                lambda row: (
+                    f"<b>Historical Anomaly</b><br>"
+                    f"Date: {row['injection_time']}<br>"
+                    f"{selected_param}: {row[selected_param]:.3f}<br>"
+                    f"{color_by}: {str(row[color_col]) if pd.notnull(row[color_col]) else 'Unknown'}<br>"
+                    f"Deviation: {format(float(row['anomaly_deviation']), '.3f') if pd.notnull(row['anomaly_deviation']) else '0.000'}<br>"
+                    f"Severity: {'Severe' if pd.notnull(row['anomaly_score']) and row['anomaly_score'] < -0.05 else 'Moderate' if pd.notnull(row['anomaly_score']) and row['anomaly_score'] < 0 else 'Normal'}"
+                ), axis=1
+            ),
+            hovertemplate='%{text}<extra></extra>',
+            hoverlabel=dict(bgcolor='#FFF3CD', font_size=12, align='left'),
+            legendgroup='historical_anomaly',
+            showlegend=True
+        ))
+
+    # 3. FUTURE ANOMALIES - Predicted anomalies
     if not future_anomalies.empty and f'predicted_{selected_param}' in future_anomalies.columns:
-        # Only show predicted ANOMALIES (not all predictions - too cluttered!)
         if 'anomaly_flag' in future_anomalies.columns:
             predicted_anomalies = future_anomalies[future_anomalies['anomaly_flag']]
         else:
             predicted_anomalies = pd.DataFrame()
+        
         if not predicted_anomalies.empty:
             fig.add_trace(go.Scatter(
                 x=predicted_anomalies['predicted_date'],
                 y=predicted_anomalies[f'predicted_{selected_param}'],
                 mode='markers',
-                name=f'Predicted Anomalies ({len(predicted_anomalies)})',
-                marker=dict(color='red', symbol='x', size=10, line=dict(width=1, color='darkred')),
-                hovertemplate=(
-                    f'<b>Date</b>: %{{x}}<br>'
-                    f'<b>{selected_param}</b>: %{{y:.3f}}<br>'
-                    f'<b>Anomaly</b>: Yes<br>'
-                    f'<b>Column</b>: %{{customdata[0]}}<br>'
-                    f'<b>Cause</b>: %{{customdata[1]}}<extra></extra>'
+                name=f'Future Anomalies ({len(predicted_anomalies)})',
+                marker=dict(color='red', symbol='diamond', size=12, line=dict(width=2, color='darkred')),
+                text=predicted_anomalies.apply(
+                    lambda row: (
+                        f"<b>Future Anomaly (Predicted)</b><br>"
+                        f"Date: {row['predicted_date']}<br>"
+                        f"{selected_param}: {row[f'predicted_{selected_param}']:.3f}<br>"
+                        f"Column: {row['column_serial_number']}<br>"
+                        f"Cause: {row['anomaly_cause']}<br>"
+                        f"Alert: {row.get('replacement_alert', 'N/A')}"
+                    ), axis=1
                 ),
-                customdata=predicted_anomalies[['column_serial_number', 'anomaly_cause']].values,
-                hoverlabel=dict(namelength=-1, font_size=12, align='left')
+                hovertemplate='%{text}<extra></extra>',
+                hoverlabel=dict(bgcolor='#F8D7DA', font_size=12, align='left'),
+                legendgroup='future_anomaly',
+                showlegend=True
             ))
+        
+        # Also show all future predictions as a reference (lighter color)
+        fig.add_trace(go.Scatter(
+            x=future_anomalies['predicted_date'],
+            y=future_anomalies[f'predicted_{selected_param}'],
+            mode='markers',
+            name='Future Predictions (All)',
+            marker=dict(color='lightgreen', size=6, opacity=0.4),
+            hovertemplate=f'<b>Date</b>: %{{x}}<br><b>{selected_param}</b>: %{{y:.3f}}<br><b>Type</b>: Predicted<extra></extra>',
+            legendgroup='future',
+            showlegend=True
+        ))
+    
+    # Add threshold lines for reference
+    if 'upper_threshold' in iqr_stats and 'lower_threshold' in iqr_stats:
+        # Upper threshold line
+        fig.add_trace(go.Scatter(
+            x=[filtered_data['injection_time'].min(), 
+               future_anomalies['predicted_date'].max() if not future_anomalies.empty else filtered_data['injection_time'].max()],
+            y=[iqr_stats['upper_threshold'], iqr_stats['upper_threshold']],
+            mode='lines',
+            name='Upper Threshold',
+            line=dict(color='rgba(255, 0, 0, 0.3)', width=2, dash='dash'),
+            hovertemplate=f'<b>Upper Threshold</b>: {iqr_stats["upper_threshold"]:.3f}<extra></extra>',
+            showlegend=True
+        ))
+        
+        # Lower threshold line
+        fig.add_trace(go.Scatter(
+            x=[filtered_data['injection_time'].min(), 
+               future_anomalies['predicted_date'].max() if not future_anomalies.empty else filtered_data['injection_time'].max()],
+            y=[iqr_stats['lower_threshold'], iqr_stats['lower_threshold']],
+            mode='lines',
+            name='Lower Threshold',
+            line=dict(color='rgba(255, 0, 0, 0.3)', width=2, dash='dash'),
+            hovertemplate=f'<b>Lower Threshold</b>: {iqr_stats["lower_threshold"]:.3f}<extra></extra>',
+            showlegend=True
+        ))
 
     # Set x-axis range to include both historical and predicted dates
     x_min = filtered_data['injection_time'].min() if not filtered_data.empty else pd.Timestamp.now()
@@ -528,25 +575,58 @@ def main():
     x_max_predicted = future_anomalies['predicted_date'].max() if not future_anomalies.empty and 'predicted_date' in future_anomalies.columns else x_max_historical
     x_max = max(x_max_historical, x_max_predicted)
     
-    # Debug: Show date ranges
+    # Show date ranges and anomaly summary
     st.info(f"📅 **Date Ranges:** Historical: {x_min.strftime('%Y-%m-%d')} to {x_max_historical.strftime('%Y-%m-%d')} | Predictions: {x_max_predicted.strftime('%Y-%m-%d') if not future_anomalies.empty else 'N/A'}")
     
-    # Show predicted anomaly status
+    # Show anomaly summary with colors
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Historical Data Points", f"{len(filtered_data):,}", help="Total historical data points")
+    with col2:
+        hist_anomaly_count = len(historical_anomalies) if not historical_anomalies.empty else 0
+        st.metric("Historical Anomalies", f"{hist_anomaly_count:,}", 
+                  delta=f"{hist_anomaly_count/len(filtered_data)*100:.1f}%" if len(filtered_data) > 0 else "0%",
+                  delta_color="inverse")
+    with col3:
+        if not future_anomalies.empty:
+            pred_anomaly_count = future_anomalies['anomaly_flag'].sum() if 'anomaly_flag' in future_anomalies.columns else 0
+            st.metric("Future Anomalies", f"{pred_anomaly_count:,}",
+                      delta=f"{pred_anomaly_count/len(future_anomalies)*100:.1f}%" if len(future_anomalies) > 0 else "0%",
+                      delta_color="inverse")
+        else:
+            st.metric("Future Anomalies", "N/A", help="No predictions loaded")
+    
+    # Alert status
     if not future_anomalies.empty:
         pred_anomaly_count = future_anomalies['anomaly_flag'].sum() if 'anomaly_flag' in future_anomalies.columns else 0
         if pred_anomaly_count == 0:
-            st.success(f"✅ **Predictions:** All {len(future_anomalies)} future predictions are NORMAL (no anomalies predicted) - System is stable!")
+            st.success(f"✅ **System Status:** All {len(future_anomalies)} future predictions are NORMAL - System is stable!")
         else:
-            st.warning(f"⚠️ **Predictions:** {pred_anomaly_count} anomalies predicted out of {len(future_anomalies)} predictions")
+            st.warning(f"⚠️ **System Status:** {pred_anomaly_count} future anomalies detected - Review required!")
     
     fig.update_layout(
-        title=f'Predicted {selected_param} with Anomalies',
-        xaxis_title='Injection Time',
-        yaxis_title=selected_param,
+        title=dict(
+            text=f'<b>{selected_param} Analysis</b><br><sub>Historical Data, Historical Anomalies & Future Predictions</sub>',
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis_title='Date / Time',
+        yaxis_title=f'{selected_param} Value',
         hovermode='closest',
         showlegend=True,
-        legend=dict(yanchor="top", y=1.1, xanchor="left", x=0, orientation="h"),
-        xaxis=dict(range=[x_min, x_max])  # Extend x-axis to include predictions
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="rgba(0, 0, 0, 0.2)",
+            borderwidth=1
+        ),
+        xaxis=dict(range=[x_min, x_max]),
+        height=600,
+        template='plotly_white'
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -555,17 +635,16 @@ def main():
     if not future_anomalies.empty and f'predicted_{selected_param}' not in future_anomalies.columns:
         available_pred_params = [col.replace('predicted_', '') for col in future_anomalies.columns if col.startswith('predicted_')]
         st.info(f"ℹ️ Predictions available for: {', '.join(available_pred_params)}. Parameter '{selected_param}' predictions not found in the file.")
-
-    # Display unique values with color dots
-    unique_items = sorted(filtered_data[color_col].astype(str).unique().tolist())
-    st.write(f"**{color_by} Values:**")
-    html_items = ""
-    for item in unique_items:
-        color = color_map[item]
-        html_items += f'<span style="color:{color};font-size:16px;margin-right:5px;">●</span><span style="margin-right:15px;">{item}</span>'
-
-    # Render the HTML string
-    st.markdown(f'<div>{html_items}</div>', unsafe_allow_html=True)
+    
+    # Legend explanation
+    st.markdown("""
+    **📊 Chart Legend:**
+    - 🔵 **Light Blue dots**: Historical data points (all measurements)
+    - 🟠 **Orange X markers**: Historical anomalies (detected in past data)
+    - 🔴 **Red Diamond markers**: Future anomalies (predicted)
+    - 🟢 **Light Green dots**: Future predictions (all forecasted values)
+    - 📏 **Red dashed lines**: Upper and lower anomaly thresholds
+    """)
 
     st.subheader("Historical Data Table")
     columns_to_display = list(dict.fromkeys([
