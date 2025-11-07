@@ -1,0 +1,11 @@
+Parameter,Anomaly_Rate_%,N_Anomalies,Best_Score,Contamination,N_Estimators,Max_Samples,Max_Features
+peak_width_5,5.00,4865,nan,0.05,50,auto,0.5
+retention_time,5.00,4866,nan,0.05,50,auto,0.5
+signal_to_noise_ratio,4.99,4860,nan,0.05,50,auto,0.5
+amount_percent,5.00,4866,nan,0.05,50,auto,0.5
+amount_value,5.00,4864,nan,0.05,50,auto,0.5
+area_percent,5.00,4866,nan,0.05,50,auto,0.5
+area_value,4.98,4845,nan,0.05,50,auto,0.5
+peak_width_50,4.97,4837,nan,0.05,50,auto,0.5
+resolution,5.00,4866,nan,0.05,50,auto,0.5
+peak_width_10,4.99,4861,nan,0.05,50,auto,0.5

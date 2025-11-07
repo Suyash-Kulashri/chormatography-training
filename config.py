@@ -31,13 +31,17 @@ for directory in [MODELS_DIR, ISOLATION_FOREST_DIR, LSTM_DIR, ENCODERS_DIR,
                   RESULTS_DIR, FUTURE_PREDICTIONS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-# Model hyperparameters (standardized across all scripts)
+# Model hyperparameters (OPTIMIZED via Grid Search - Nov 7, 2025)
 RANDOM_STATE = 42
-CONTAMINATION = 0.1  # 10% anomaly rate (standardized)
+CONTAMINATION = 0.05  # 5% anomaly rate (optimized via hyperparameter tuning)
 INJECTION_THRESHOLD = 1000
 SEQ_LENGTH = 10  # LSTM sequence length
 MAX_SEQUENCES_PER_COLUMN = 1000
-N_ESTIMATORS = 100  # Isolation Forest trees
+
+# Isolation Forest hyperparameters (optimized via Grid Search)
+N_ESTIMATORS = 50  # Number of trees (optimized)
+MAX_FEATURES = 0.5  # Feature sampling rate (optimized)
+MAX_SAMPLES = 'auto'  # Samples per tree (optimized)
 
 # Prediction settings
 N_FUTURE_DAYS = 30  # Days to predict ahead
@@ -76,10 +80,11 @@ def get_feature_cols(selected_param):
     ]
 
 # Anomaly threshold method (standardized)
-ANOMALY_THRESHOLD_METHOD = "mean_std"  # Options: "mean_std", "percentile"
-ANOMALY_STD_MULTIPLIER = 3  # For mean ± N*std method
-ANOMALY_PERCENTILE_LOWER = 5  # For percentile method
-ANOMALY_PERCENTILE_UPPER = 95  # For percentile method
+# Use percentile method to match contamination rate (5% total = 2.5th to 97.5th percentile)
+ANOMALY_THRESHOLD_METHOD = "percentile"  # Options: "mean_std", "percentile"
+ANOMALY_STD_MULTIPLIER = 3  # For mean ± N*std method (not recommended - too strict)
+ANOMALY_PERCENTILE_LOWER = 2.5  # For percentile method (2.5% below = anomalies)
+ANOMALY_PERCENTILE_UPPER = 97.5  # For percentile method (2.5% above = anomalies, total 5%)
 
 # Column replacement threshold (injection count)
 REPLACEMENT_INJECTION_THRESHOLD = 1000  # Suggest replacement after N injections

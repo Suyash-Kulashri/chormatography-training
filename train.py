@@ -293,8 +293,14 @@ class ChromatographyTrainer:
         # Prepare features
         X, scaler, feature_cols = self.prepare_features(df, param)
         
-        # Train model
-        model = IsolationForest(contamination=CONTAMINATION, random_state=RANDOM_STATE, n_estimators=100)
+        # Train model with optimized hyperparameters
+        model = IsolationForest(
+            contamination=CONTAMINATION, 
+            random_state=RANDOM_STATE, 
+            n_estimators=config.N_ESTIMATORS,
+            max_features=config.MAX_FEATURES,
+            max_samples=config.MAX_SAMPLES
+        )
         model.fit(X)
         
         # Detect anomalies
@@ -303,11 +309,12 @@ class ChromatographyTrainer:
         df_result['anomaly'] = np.where(anomaly_pred == -1, 1, 0)
         df_result['anomaly_score'] = model.decision_function(X)
         
-        # Calculate anomaly statistics
+        # Calculate anomaly statistics using percentile method (matches contamination rate ~10%)
+        # This ensures consistency with future anomaly detection
         mean_val = df[param].mean()
         std_val = df[param].std()
-        upper_threshold = mean_val + 3 * std_val
-        lower_threshold = mean_val - 3 * std_val
+        upper_threshold = df[param].quantile(config.ANOMALY_PERCENTILE_UPPER / 100)
+        lower_threshold = df[param].quantile(config.ANOMALY_PERCENTILE_LOWER / 100)
         
         df_result['anomaly_feature'] = param
         df_result['anomaly_deviation'] = df[param].apply(

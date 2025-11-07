@@ -41,7 +41,8 @@ venv.bak/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*.ipynb
+# Keep hyperparameter tuning notebook
+# *.ipynb
 
 # Model Files - Now included in git
 # *.pkl
@@ -90,6 +91,15 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.rar
+
+# HTML visualizations (can be regenerated)
+*.html
+
+# Generated optimization results (keep JSON/CSV summaries, exclude redundant files)
+optimal_hyperparameters_*.json
+hyperparameter_tuning_summary_*.csv
+!optimal_hyperparameters_20251107_*.json
+!hyperparameter_tuning_summary_20251107_*.csv
 
 # Temporary Files
 *.tmp

@@ -383,13 +383,29 @@ def predict_future(model, last_sequence, n_future, target_cols, feature_cols, ta
     predictions = np.array(predictions).reshape(-1, 1)
     unscaled_predictions = target_scaler.inverse_transform(predictions)
     
-    pred_mean = unscaled_predictions.mean()
-    pred_std = unscaled_predictions.std()
-    if pred_std > 0:
-        normalized_predictions = (unscaled_predictions - pred_mean) / pred_std * hist_std + hist_mean
-    else:
-        normalized_predictions = unscaled_predictions
+    # More conservative normalization: don't force distribution matching
+    # Just clip to historical range with some margin for natural variation
+    # This prevents unrealistic values while allowing some prediction variance
     
+    # Calculate historical range with small margin (5% on each side)
+    hist_range = hist_max - hist_min
+    margin = hist_range * 0.05  # 5% margin
+    safe_min = hist_min - margin
+    safe_max = hist_max + margin
+    
+    # Clip predictions to safe range (allows slight extrapolation)
+    normalized_predictions = np.clip(unscaled_predictions, safe_min, safe_max)
+    
+    # Additional smoothing: if predictions are too far from historical mean,
+    # pull them back towards the mean (prevents unrealistic jumps)
+    for i in range(len(normalized_predictions)):
+        pred_val = normalized_predictions[i, 0]
+        # If prediction is more than 2 standard deviations from mean, dampen it
+        if abs(pred_val - hist_mean) > 2 * hist_std:
+            # Pull prediction 30% towards the mean
+            normalized_predictions[i, 0] = 0.7 * pred_val + 0.3 * hist_mean
+    
+    # Final clip to ensure within reasonable bounds
     normalized_predictions = np.clip(normalized_predictions, hist_min, hist_max)
     
     return normalized_predictions, valid_target_cols
@@ -591,18 +607,16 @@ def generate_future_predictions_with_anomalies(df, output_dir, timestamp):
             pred_df['system_name'] = last_row.get('system_name', 0) if 'system_name' in col_data.columns else 0
             pred_df['analyte'] = last_row.get('analyte', 0) if 'analyte' in col_data.columns else 0
             
-            # Detect anomalies using standardized threshold method (from config.py)
+            # Detect anomalies using SAME method as historical data
+            # Use percentile method to match contamination rate (~10% anomalies)
             hist_values = col_data[param].values
             hist_mean = col_data[param].mean()
             hist_std = col_data[param].std()
             
-            # Use standardized threshold calculation method
-            if config.ANOMALY_THRESHOLD_METHOD == "mean_std":
-                upper_threshold = hist_mean + config.ANOMALY_STD_MULTIPLIER * hist_std
-                lower_threshold = hist_mean - config.ANOMALY_STD_MULTIPLIER * hist_std
-            else:  # percentile method
-                upper_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_UPPER)
-                lower_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_LOWER)
+            # Use percentile method to match contamination rate (10% = 5th to 95th percentile)
+            # This ensures consistency with historical anomaly detection
+            upper_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_UPPER)
+            lower_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_LOWER)
             
             # Calculate deviation and flag anomalies
             pred_df['anomaly_deviation'] = pred_df[f'predicted_{param}'].apply(
@@ -610,8 +624,15 @@ def generate_future_predictions_with_anomalies(df, output_dir, timestamp):
                           lower_threshold - x if x < lower_threshold else 0
             )
             
-            # Flag as anomaly if outside percentile range
+            # Flag as anomaly if outside percentile range (matches ~10% contamination rate)
+            # Only flag if significantly outside (not just slightly)
             pred_df['anomaly_flag'] = (pred_df[f'predicted_{param}'] > upper_threshold) | (pred_df[f'predicted_{param}'] < lower_threshold)
+            
+            # Additional check: ensure anomaly rate is reasonable (~10%)
+            # If too many anomalies, it might indicate prediction issues
+            anomaly_rate = pred_df['anomaly_flag'].sum() / len(pred_df) if len(pred_df) > 0 else 0
+            if anomaly_rate > 0.2:  # More than 20% anomalies is suspicious
+                print(f"    ⚠ Warning: High anomaly rate ({anomaly_rate*100:.1f}%) for {col_serial} - predictions may be unrealistic")
             
             # Calculate anomaly score based on how many standard deviations away
             hist_mean = col_data[param].mean()

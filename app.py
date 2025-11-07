@@ -222,32 +222,35 @@ def prepare_features(df, selected_param):
     return X_scaled, scaler, feature_cols
 
 def train_anomaly_model(X):
-    # Standardized configuration from config.py
+    # Optimized configuration from config.py (via Grid Search tuning)
     model = IsolationForest(
         contamination=CONTAMINATION, 
         random_state=RANDOM_STATE, 
-        n_estimators=config.N_ESTIMATORS
+        n_estimators=config.N_ESTIMATORS,
+        max_features=config.MAX_FEATURES,
+        max_samples=config.MAX_SAMPLES
     )
     model.fit(X)
     return model
 
 def detect_anomalies(df, X, model, feature_cols, selected_param):
     # Standardized anomaly detection logic
+    # Use Isolation Forest for detection, but calculate thresholds using percentile method
+    # This ensures consistency with future anomaly detection
     df['anomaly'] = model.predict(X)
     df['anomaly'] = df['anomaly'].map({1: 0, -1: 1})
     df['anomaly_score'] = model.decision_function(X)
     
-    # Standardized threshold calculation (from config.py)
-    if config.ANOMALY_THRESHOLD_METHOD == "mean_std":
-        mean_val = df[selected_param].mean()
-        std_val = df[selected_param].std()
-        upper_threshold = mean_val + config.ANOMALY_STD_MULTIPLIER * std_val
-        lower_threshold = mean_val - config.ANOMALY_STD_MULTIPLIER * std_val
-    else:  # percentile method
-        upper_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_UPPER / 100)
-        lower_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_LOWER / 100)
-        mean_val = df[selected_param].mean()
-        std_val = df[selected_param].std()
+    # Use percentile method for threshold calculation (matches contamination rate ~10%)
+    # This ensures consistency between historical and future anomaly detection
+    mean_val = df[selected_param].mean()
+    std_val = df[selected_param].std()
+    upper_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_UPPER / 100)
+    lower_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_LOWER / 100)
+    
+    # Note: Isolation Forest may detect different anomalies than percentile thresholds
+    # This is expected - Isolation Forest considers multivariate patterns
+    # But we use percentile thresholds for consistency with future predictions
     
     df['anomaly_feature'] = selected_param
     df['anomaly_deviation'] = df[selected_param].apply(

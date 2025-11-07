@@ -1,0 +1,171 @@
+{
+  "timestamp": "2025-11-07 22:08:10",
+  "dataset": "chromatography_final_merged_data.csv",
+  "total_samples": 97321,
+  "cv_folds": 3,
+  "random_state": 42,
+  "optimal_hyperparameters": {
+    "peak_width_5": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "retention_time": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "signal_to_noise_ratio": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "amount_percent": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "amount_value": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "area_percent": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "area_value": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "peak_width_50": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "resolution": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    },
+    "peak_width_10": {
+      "contamination": 0.05,
+      "max_features": 0.5,
+      "max_samples": "auto",
+      "n_estimators": 50
+    }
+  },
+  "summary": [
+    {
+      "Parameter": "peak_width_5",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4865,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "retention_time",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4866,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "signal_to_noise_ratio",
+      "Anomaly_Rate_%": "4.99",
+      "N_Anomalies": 4860,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "amount_percent",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4866,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "amount_value",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4864,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "area_percent",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4866,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "area_value",
+      "Anomaly_Rate_%": "4.98",
+      "N_Anomalies": 4845,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "peak_width_50",
+      "Anomaly_Rate_%": "4.97",
+      "N_Anomalies": 4837,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "resolution",
+      "Anomaly_Rate_%": "5.00",
+      "N_Anomalies": 4866,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    },
+    {
+      "Parameter": "peak_width_10",
+      "Anomaly_Rate_%": "4.99",
+      "N_Anomalies": 4861,
+      "Best_Score": "nan",
+      "Contamination": 0.05,
+      "N_Estimators": 50,
+      "Max_Samples": "auto",
+      "Max_Features": 0.5
+    }
+  ]
+}
