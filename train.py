@@ -25,11 +25,15 @@ import argparse
 import os
 import warnings
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Suppress TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN messages
 warnings.filterwarnings('ignore')
+
+# Import configuration
+import config
 
 print("  ✓ Basic libraries loaded")
 
@@ -82,17 +86,16 @@ import json
 
 print("  ✓ All libraries loaded successfully!\n")
 
-# Configuration
-RANDOM_STATE = 42
-CONTAMINATION = 0.1
-INJECTION_THRESHOLD = 1000
-SEQ_LENGTH = 10
-MAX_SEQUENCES_PER_COLUMN = 1000
-N_FUTURE = 14
-PARAMS = [
-    'analyte','peak_width_5', 'retention_time', 'signal_to_noise_ratio', 'amount_percent',
-    'amount_value', 'area_percent', 'area_value', 'peak_width_50', 'resolution', 'peak_width_10'
-]
+# Use configuration from config.py
+RANDOM_STATE = config.RANDOM_STATE
+CONTAMINATION = config.CONTAMINATION
+INJECTION_THRESHOLD = config.INJECTION_THRESHOLD
+SEQ_LENGTH = config.SEQ_LENGTH
+MAX_SEQUENCES_PER_COLUMN = config.MAX_SEQUENCES_PER_COLUMN
+N_FUTURE = config.N_FUTURE_DAYS
+PARAMS = config.PARAMS
+CATEGORICAL_COLS = config.CATEGORICAL_COLS
+NUMERIC_COLS = config.NUMERIC_COLS
 
 # Set random seeds for reproducibility
 np.random.seed(RANDOM_STATE)
@@ -193,8 +196,15 @@ class ChromatographyTrainer:
         ]
         df = df.drop(columns=[col for col in columns_to_drop if col in df.columns], errors='ignore')
         
-        # Handle injection_time
+        # Handle injection_time with timezone normalization
         df["injection_time"] = pd.to_datetime(df["injection_time"], errors="coerce")
+        df["injection_time"] = config.normalize_timezone(df["injection_time"])
+        
+        # Validate critical columns
+        critical_cols = ["injection_time"]
+        is_valid, missing = config.validate_dataframe_columns(df, critical_cols, "train.py")
+        if not is_valid:
+            raise ValueError(f"Missing critical columns: {missing}")
         
         # Create synthetic column_serial_number if missing or empty
         if 'column_serial_number' not in df.columns or df['column_serial_number'].isna().all():
@@ -210,15 +220,18 @@ class ChromatographyTrainer:
         df = df.dropna(subset=["column_serial_number", "injection_time"])
         print(f"Rows after dropping NaN in critical columns: {len(df)}")
         
+        # Validate numeric columns
+        numeric_issues = config.validate_numeric_columns(df, NUMERIC_COLS)
+        if numeric_issues:
+            print(f"Numeric column quality issues:")
+            for col, pct in numeric_issues.items():
+                print(f"  {col}: {pct:.1f}% non-numeric values")
+        
         # Sort data
         df = df.sort_values(['column_serial_number', 'injection_time'])
         
         # Handle numeric columns
-        numeric_cols = [
-            "peak_width_5", "retention_time", "signal_to_noise_ratio", "amount_percent", "amount_value",
-            "area_percent", "area_value", "peak_width_50", "resolution", "peak_width_10"
-        ]
-        for col in numeric_cols:
+        for col in NUMERIC_COLS:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
                 # Fill NaN with group median
@@ -235,12 +248,8 @@ class ChromatographyTrainer:
         ).dt.days
         
         # Handle categorical columns with label encoding
-        categorical_cols = [
-            "system_name", "column_serial_number", "analyte", "method_set_name", "project",
-            "sample_name", "system_operator"
-        ]
         label_encoders = {}
-        for col in categorical_cols:
+        for col in CATEGORICAL_COLS:
             if col in df.columns:
                 df[f"{col}_original"] = df[col]
                 le = LabelEncoder()
@@ -596,8 +605,11 @@ class ChromatographyTrainer:
     
     def generate_predictions_with_anomalies(self, df, historical_df):
         """Generate future predictions and detect anomalies (Phase 3)."""
-        prediction_start = pd.Timestamp('2025-07-01').tz_localize(None)
-        n_future = 14  # Predict 2 weeks ahead (14 days)
+        # Use dynamic date: predict from the day after the latest data
+        latest_date = df['injection_time'].max()
+        prediction_start = latest_date + timedelta(days=1)
+        prediction_start = prediction_start.tz_localize(None) if prediction_start.tz is not None else prediction_start
+        n_future = N_FUTURE  # Use config value
         
         all_predictions = []
         
@@ -693,6 +705,12 @@ class ChromatographyTrainer:
                     'sample_name': col_data['sample_name_original'].iloc[-1],
                     'system_operator': col_data['system_operator_original'].iloc[-1]
                 })
+                
+                # Add replacement_alert based on injection count threshold
+                pred_df['replacement_alert'] = pred_df['injection_count'].apply(
+                    lambda x: 'Column replacement recommended' if x >= config.REPLACEMENT_INJECTION_THRESHOLD 
+                    else 'Normal operation'
+                )
                 
                 # Add predicted values
                 for idx, col in enumerate(valid_target_cols):

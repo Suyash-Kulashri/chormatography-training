@@ -12,16 +12,26 @@ import textwrap
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
+# Import configuration
+import config
 
+# Use configuration from config.py
+CSV_FILE = config.DEFAULT_CSV_FILE
+MODEL_OUTPUT = str(config.BASE_DIR / "isolation_forest_model.pkl")
+RANDOM_STATE = config.RANDOM_STATE
+CONTAMINATION = config.CONTAMINATION
+INJECTION_THRESHOLD = config.INJECTION_THRESHOLD
+CATEGORICAL_COLS = config.CATEGORICAL_COLS
+NUMERIC_COLS = config.NUMERIC_COLS
 
-CSV_FILE = "chromatography_final_merged_data.csv"  # Using YOUR new data directly
-# Using predictions generated from YOUR new_data.csv (with REALISTIC anomaly detection!)
-PREDICTED_CSV_FILE = "/Users/mukulpathak/Desktop/chromo train/future_predictions/future_predictions_30days_20251106_171758.csv"
-MODEL_OUTPUT = "isolation_forest_model.pkl"
-RANDOM_STATE = 42
-CONTAMINATION = 0.1  # Reasonable anomaly rate: 10% (0.5 was too high - flagged everything!)
-INJECTION_THRESHOLD = 1000
+# Get latest prediction file dynamically
+PREDICTED_CSV_FILE = config.get_latest_prediction_file()
+if PREDICTED_CSV_FILE is None:
+    PREDICTED_CSV_FILE = str(config.FUTURE_PREDICTIONS_DIR / "future_predictions_30days_latest.csv")
+else:
+    PREDICTED_CSV_FILE = str(PREDICTED_CSV_FILE)
 
 # Custom CSS for styling
 st.markdown("""
@@ -124,7 +134,16 @@ def load_and_preprocess_data(file_path):
     if 'injection_time' not in df.columns:
         raise ValueError("Required column 'injection_time' is missing.")
 
-    df['injection_time'] = pd.to_datetime(df['injection_time'], errors='coerce').dt.tz_localize(None)
+    # Handle injection_time with timezone normalization
+    df['injection_time'] = pd.to_datetime(df['injection_time'], errors='coerce')
+    df['injection_time'] = config.normalize_timezone(df['injection_time'])
+    
+    # Validate critical columns
+    critical_cols = ["injection_time"]
+    is_valid, missing = config.validate_dataframe_columns(df, critical_cols, "app.py")
+    if not is_valid:
+        st.error(f"Missing critical columns: {missing}")
+        raise ValueError(f"Missing critical columns: {missing}")
     
     # CRITICAL: Create synthetic column_serial_number FIRST (new_data.csv is 100% missing this)
     if 'column_serial_number' in df.columns and df['column_serial_number'].isna().all():
@@ -136,11 +155,7 @@ def load_and_preprocess_data(file_path):
     
     df = df.dropna(subset=['column_serial_number', 'injection_time'])
 
-    numeric_cols = [
-        'peak_width_5', 'retention_time', 'signal_to_noise_ratio', 'amount_percent', 'amount_value', 
-        'area_percent', 'area_value', 'peak_width_50', 'resolution', 'peak_width_10'
-    ]
-    for col in numeric_cols:
+    for col in NUMERIC_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             df[col] = df.groupby('column_serial_number')[col].transform(
@@ -152,20 +167,41 @@ def load_and_preprocess_data(file_path):
     df['injection_count'] = df.groupby('column_serial_number').cumcount() + 1
     df['days_since_start'] = (df['injection_time'] - df.groupby('column_serial_number')['injection_time'].transform('min')).dt.days
 
-    categorical_cols = [
-        'system_name', 'column_serial_number', 'analyte', 'method_set_name', 'project', 
-        'sample_name', 'system_operator'
-    ]
-    for col in categorical_cols:
+    # Save original values before encoding
+    for col in CATEGORICAL_COLS:
         if col in df.columns:
             df[f'{col}_original'] = df[col]
 
-    label_encoders = {}
-    for col in categorical_cols:
-        if col in df.columns:
-            le = LabelEncoder()
-            df[col] = le.fit_transform(df[col].astype(str))
-            label_encoders[col] = le
+    # Try to load pre-trained label encoders
+    latest_timestamp = config.get_latest_model_timestamp("encoders")
+    label_encoders = None
+    
+    if latest_timestamp:
+        encoder_path = config.get_model_paths(latest_timestamp)['encoders']
+        if encoder_path.exists():
+            try:
+                label_encoders = joblib.load(encoder_path)
+                print(f"Loaded pre-trained encoders from {encoder_path}")
+            except Exception as e:
+                print(f"Error loading encoders: {e}. Creating new encoders.")
+    
+    # If no pre-trained encoders, create new ones
+    if label_encoders is None:
+        label_encoders = {}
+        for col in CATEGORICAL_COLS:
+            if col in df.columns:
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col].astype(str))
+                label_encoders[col] = le
+    else:
+        # Use pre-trained encoders
+        for col in CATEGORICAL_COLS:
+            if col in df.columns and col in label_encoders:
+                le = label_encoders[col]
+                # Handle unseen labels
+                df[col] = df[col].astype(str).apply(
+                    lambda x: le.transform([x])[0] if x in le.classes_ else -1
+                )
 
     return df, label_encoders
 
@@ -186,22 +222,32 @@ def prepare_features(df, selected_param):
     return X_scaled, scaler, feature_cols
 
 def train_anomaly_model(X):
-    # Matching job_2.py configuration: contamination=0.5, n_estimators=50
-    model = IsolationForest(contamination=CONTAMINATION, random_state=RANDOM_STATE, n_estimators=50)
+    # Standardized configuration from config.py
+    model = IsolationForest(
+        contamination=CONTAMINATION, 
+        random_state=RANDOM_STATE, 
+        n_estimators=config.N_ESTIMATORS
+    )
     model.fit(X)
     return model
 
 def detect_anomalies(df, X, model, feature_cols, selected_param):
-    # Matching job_2.py logic exactly
+    # Standardized anomaly detection logic
     df['anomaly'] = model.predict(X)
     df['anomaly'] = df['anomaly'].map({1: 0, -1: 1})
     df['anomaly_score'] = model.decision_function(X)
     
-    # Use mean ± 3*std threshold (same as job_2.py)
-    mean_val = df[selected_param].mean()
-    std_val = df[selected_param].std()
-    upper_threshold = mean_val + 3 * std_val
-    lower_threshold = mean_val - 3 * std_val
+    # Standardized threshold calculation (from config.py)
+    if config.ANOMALY_THRESHOLD_METHOD == "mean_std":
+        mean_val = df[selected_param].mean()
+        std_val = df[selected_param].std()
+        upper_threshold = mean_val + config.ANOMALY_STD_MULTIPLIER * std_val
+        lower_threshold = mean_val - config.ANOMALY_STD_MULTIPLIER * std_val
+    else:  # percentile method
+        upper_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_UPPER / 100)
+        lower_threshold = df[selected_param].quantile(config.ANOMALY_PERCENTILE_LOWER / 100)
+        mean_val = df[selected_param].mean()
+        std_val = df[selected_param].std()
     
     df['anomaly_feature'] = selected_param
     df['anomaly_deviation'] = df[selected_param].apply(
@@ -209,7 +255,7 @@ def detect_anomalies(df, X, model, feature_cols, selected_param):
                   lower_threshold - x if x < lower_threshold else 0
     )
     
-    # Return threshold stats (matching job_2.py approach)
+    # Return threshold stats
     return df, {
         'mean': mean_val, 
         'std': std_val, 

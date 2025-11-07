@@ -25,12 +25,16 @@ import argparse
 import os
 import warnings
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Suppress TensorFlow warnings and fix macOS threading issues
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['OMP_NUM_THREADS'] = '1'  # Prevent threading issues on macOS
 warnings.filterwarnings('ignore')
+
+# Import configuration
+import config
 
 print("  ✓ Basic libraries loaded")
 
@@ -80,16 +84,15 @@ import random
 
 print("  ✓ All libraries loaded successfully!\n")
 
-# Configuration
-RANDOM_STATE = 42
-CONTAMINATION = 0.05
-SEQ_LENGTH = 10
-MAX_SEQUENCES_PER_COLUMN = 1000
-N_FUTURE_DAYS = 30  # Predict 1 month ahead
-PARAMS = [
-    'peak_width_5', 'retention_time', 'signal_to_noise_ratio', 'amount_percent',
-    'amount_value', 'area_percent', 'area_value', 'peak_width_50', 'resolution', 'peak_width_10'
-]
+# Use configuration from config.py
+RANDOM_STATE = config.RANDOM_STATE
+CONTAMINATION = config.CONTAMINATION
+SEQ_LENGTH = config.SEQ_LENGTH
+MAX_SEQUENCES_PER_COLUMN = config.MAX_SEQUENCES_PER_COLUMN
+N_FUTURE_DAYS = config.N_FUTURE_DAYS
+PARAMS = config.PARAMS
+CATEGORICAL_COLS = config.CATEGORICAL_COLS
+NUMERIC_COLS = config.NUMERIC_COLS
 
 # Set random seeds
 np.random.seed(RANDOM_STATE)
@@ -130,8 +133,15 @@ def load_and_preprocess_data(file_path):
         if 'column_serial_number_injection' in df.columns:
             df['column_serial_number'] = df['column_serial_number_injection']
     
-    # Handle injection_time
-    df['injection_time'] = pd.to_datetime(df['injection_time'], errors='coerce').dt.tz_localize(None)
+    # Handle injection_time with timezone normalization
+    df['injection_time'] = pd.to_datetime(df['injection_time'], errors='coerce')
+    df['injection_time'] = config.normalize_timezone(df['injection_time'])
+    
+    # Validate critical columns
+    critical_cols = ["injection_time"]
+    is_valid, missing = config.validate_dataframe_columns(df, critical_cols, "generate_future_anomalies.py")
+    if not is_valid:
+        print(f"WARNING: Missing critical columns: {missing}")
     
     # Create synthetic column_serial_number if missing
     if 'column_serial_number' not in df.columns or df['column_serial_number'].isna().all():
@@ -150,15 +160,19 @@ def load_and_preprocess_data(file_path):
     df = df.dropna(subset=['column_serial_number', 'injection_time'])
     print(f"Rows after dropping NaN in critical columns: {len(df)}")
     
+    # Validate numeric columns
+    numeric_issues = config.validate_numeric_columns(df, NUMERIC_COLS)
+    if numeric_issues:
+        print(f"Numeric column quality issues:")
+        for col, pct in numeric_issues.items():
+            if pct > 10:  # Only show if > 10% issues
+                print(f"  {col}: {pct:.1f}% non-numeric values")
+    
     # Sort data
     df = df.sort_values(['column_serial_number', 'injection_time'])
     
     # Handle numeric columns
-    numeric_cols = [
-        'peak_width_5', 'retention_time', 'signal_to_noise_ratio', 'amount_percent', 'amount_value',
-        'area_percent', 'area_value', 'peak_width_50', 'resolution', 'peak_width_10'
-    ]
-    for col in numeric_cols:
+    for col in NUMERIC_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             df[col] = df.groupby('column_serial_number')[col].transform(
@@ -173,12 +187,8 @@ def load_and_preprocess_data(file_path):
     ).dt.days
     
     # Handle categorical columns with label encoding
-    categorical_cols = [
-        'system_name', 'column_serial_number', 'analyte', 'method_set_name', 'project',
-        'sample_name', 'system_operator'
-    ]
     label_encoders = {}
-    for col in categorical_cols:
+    for col in CATEGORICAL_COLS:
         if col in df.columns:
             df[f'{col}_original'] = df[col]
             le = LabelEncoder()
@@ -554,6 +564,12 @@ def generate_future_predictions_with_anomalies(df, output_dir, timestamp):
                 'system_operator': col_data['system_operator_original'].iloc[-1] if 'system_operator_original' in col_data.columns else 'Unknown'
             })
             
+            # Add replacement_alert based on injection count threshold
+            pred_df['replacement_alert'] = pred_df['injection_count'].apply(
+                lambda x: 'Column replacement recommended' if x >= config.REPLACEMENT_INJECTION_THRESHOLD 
+                else 'Normal operation'
+            )
+            
             # Add predicted values
             for idx, col in enumerate(valid_target_cols):
                 pred_df[f'predicted_{col}'] = future_preds.flatten()
@@ -575,19 +591,18 @@ def generate_future_predictions_with_anomalies(df, output_dir, timestamp):
             pred_df['system_name'] = last_row.get('system_name', 0) if 'system_name' in col_data.columns else 0
             pred_df['analyte'] = last_row.get('analyte', 0) if 'analyte' in col_data.columns else 0
             
-            # Detect anomalies in future predictions using percentile-based thresholds
-            # Use historical percentiles to match the contamination rate (10%)
+            # Detect anomalies using standardized threshold method (from config.py)
             hist_values = col_data[param].values
+            hist_mean = col_data[param].mean()
+            hist_std = col_data[param].std()
             
-            # Calculate thresholds based on percentiles (top 5% and bottom 5% = 10% total)
-            upper_threshold = np.percentile(hist_values, 95)  # Top 5% are anomalies
-            lower_threshold = np.percentile(hist_values, 5)   # Bottom 5% are anomalies
-            
-            # Alternative: Use 2-sigma for more reasonable detection (~5% anomalies)
-            # hist_mean = col_data[param].mean()
-            # hist_std = col_data[param].std()
-            # upper_threshold = hist_mean + 2 * hist_std
-            # lower_threshold = hist_mean - 2 * hist_std
+            # Use standardized threshold calculation method
+            if config.ANOMALY_THRESHOLD_METHOD == "mean_std":
+                upper_threshold = hist_mean + config.ANOMALY_STD_MULTIPLIER * hist_std
+                lower_threshold = hist_mean - config.ANOMALY_STD_MULTIPLIER * hist_std
+            else:  # percentile method
+                upper_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_UPPER)
+                lower_threshold = np.percentile(hist_values, config.ANOMALY_PERCENTILE_LOWER)
             
             # Calculate deviation and flag anomalies
             pred_df['anomaly_deviation'] = pred_df[f'predicted_{param}'].apply(
