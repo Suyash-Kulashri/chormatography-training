@@ -360,6 +360,8 @@ def main():
     system_name = st.sidebar.selectbox("System Name", ["All"] + sorted(df['system_name_original'].unique().tolist()))
     method_set = st.sidebar.selectbox("Method Set", ["All"] + sorted(df['method_set_name_original'].unique().tolist()))
     selected_column = st.sidebar.multiselect("Column Serial Number", ["All"] + sorted(df['column_serial_number_original'].unique().tolist()), default=["All"])
+    use_pretrained_models = st.sidebar.checkbox("Use Pre-trained Models (faster)", value=True,
+                                                  help="Load pre-trained models instead of retraining on filtered data")
     show_predicted_table = st.sidebar.checkbox("Show Predicted Data Table", value=False)
     show_deviation_graph = st.sidebar.checkbox("Show Deviation Graph", value=False)
     show_chromatogram_overlay = st.sidebar.checkbox("Show Chromatogram Overlay", value=False)
@@ -403,9 +405,35 @@ def main():
         st.error(f"Error preparing features: {e}")
         return
 
-    iso_model = train_anomaly_model(X)
+    # Try to load pre-trained model if checkbox is selected
+    iso_model = None
+    model_loaded = False
+    
+    if use_pretrained_models:
+        latest_timestamp = config.get_latest_model_timestamp("isolation_forest")
+        if latest_timestamp:
+            model_path = config.get_model_paths(latest_timestamp, selected_param)['isolation_forest']
+            if model_path.exists():
+                try:
+                    model_data = joblib.load(model_path)
+                    iso_model = model_data['model']
+                    # Use the scaler from saved model for consistency
+                    if 'scaler' in model_data:
+                        scaler = model_data['scaler']
+                    model_loaded = True
+                    st.info(f"✅ Loaded pre-trained model for {selected_param} from {model_path.name}")
+                except Exception as e:
+                    st.warning(f"⚠️ Could not load pre-trained model: {e}. Training new model...")
+    
+    # Train new model if pre-trained model not loaded
+    if iso_model is None:
+        iso_model = train_anomaly_model(X)
+        if not model_loaded:
+            st.info(f"📊 Training new Isolation Forest model for {selected_param}...")
+        # Save the newly trained model
+        joblib.dump({'model': iso_model, 'scaler': scaler, 'label_encoders': label_encoders}, MODEL_OUTPUT)
+    
     filtered_data, iqr_stats = detect_anomalies(filtered_data, X, iso_model, feature_cols, selected_param)
-    joblib.dump({'model': iso_model, 'scaler': scaler, 'label_encoders': label_encoders}, MODEL_OUTPUT)
     
     # Show anomaly detection statistics
     total_points = len(filtered_data)
