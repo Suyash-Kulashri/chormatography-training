@@ -43,28 +43,26 @@ venv.bak/
 .ipynb_checkpoints
 *.ipynb
 
-# Model Files (trained models - too large for git)
-*.pkl
-*.h5
-*.hdf5
-*.joblib
-*.model
-*.pb
-*.onnx
-*.pt
-*.pth
+# Model Files - Now included in git
+# *.pkl
+# *.h5
+# *.hdf5
+# *.joblib
+# *.model
+# *.pb
+# *.onnx
+# *.pt
+# *.pth
 
-# MLflow
+# MLflow (still exclude MLflow runs)
 models/mlruns/
 mlruns/
 .mlflow/
 
-# Data Files (exclude large data files, keep sample if needed)
-*.csv
-!chromatography_sample_200.csv  # Keep sample data if you want
-!requirements.txt  # Keep requirements
+# Data Files - Now included in git
+# *.csv
 
-# Generated Predictions
+# Generated Predictions - Still exclude generated predictions
 future_predictions/*.csv
 models/results/*.csv
 
